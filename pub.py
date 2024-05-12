@@ -3,6 +3,19 @@ import glob
 import json
 import re
 from datetime import datetime, timedelta
+import logging
+from logging.handlers import RotatingFileHandler
+
+# Set up logging
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+# Define log file name with timestamp and rotation
+log_file = datetime.now().strftime("pubdb_sync_logs_%Y-%m-%d.log")
+handler = RotatingFileHandler(log_file, maxBytes=100000, backupCount=5)
+formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+handler.setFormatter(formatter)
+logger.addHandler(handler)
 
 INVENIOHOST = "https://inveniordm.jlab.org"
 TOKEN = ""
@@ -302,8 +315,8 @@ def transform(entry):
         linkDict = getLinksDict(entry["links"])
         inveniodict["metadata"].update(linkDict)
     
-    inveniodict["metadata"].update(getRightsDict)
-    inveniodict["metadata"].update(getAccessDict)
+    inveniodict["metadata"].update(getRightsDict())
+    inveniodict["metadata"].update(getAccessDict())
     inveniodict["communities"] =  {"ids": [COMMUNITYID]}
 
 
@@ -330,7 +343,7 @@ def uploadNew(invenioDict):
     res = requests.get(ifExistsUrl)
     if res.status_code == 200:
         if res.json()['hits']['total'] != 0:
-            print(f"Record with pubID {pubID} already exists")
+            logger.info(f"Record with pubID {pubID} already exists")
             return False
     if res.json()['hits']['total'] == 0:
         createURL = f"{INVENIOHOST}/api/records"
@@ -345,29 +358,30 @@ def uploadNew(invenioDict):
                 submitURL = reviewRes.json()['links']['actions']['submit']
                 submitRes = requests.post(submitURL, data=json.dumps(submitData), headers=h,verify=True)
                 if submitRes.status_code in [202, 200]:
-                        print("success submit for review")
+                        logger.info("success submit for review")
                         acceptURL = submitRes.json()['links']['actions']['accept']
                         acceptData = {"payload": {"content": "You are in!", "format": "html"}}
                         acceptRes = requests.post(acceptURL, data=json.dumps(acceptData), headers=h,verify=True)
                         if acceptRes.status_code in [202, 200]:
-                            print("Whole upload, review, submit and accept OK")
+                            logger.info("Whole upload, review, submit and accept OK")
                         else:
-                            print(acceptRes.status_code)
-                            print(acceptRes.json())
+                            logger.info(acceptRes.status_code)
+                            logger.info(acceptRes.json())
+                            return False
                 else:
-                    print(submitRes.status_code)
-                    print(submitRes.json())
+                    logger.error(submitRes.status_code)
+                    logger.error(submitRes.json())
+                    return False
             else:
-                print(reviewRes.status_code)
-                print(reviewRes.json())
+                logger.error(reviewRes.status_code)
+                logger.error(reviewRes.json())
+                return False
         else:
-            print(createRes.status_code)
-            print(createRes.json())
-    else:
-        print(f"Record with pubID {pubID} already exists")
-        print("This should NOT happend check with MIS group")
+            logger.error(createRes.status_code)
+            logger.error(createRes.json())
+            return False
 
-    return "OK"
+    return True
 
 
 def uploadModify(invenioDict):
@@ -376,11 +390,11 @@ def uploadModify(invenioDict):
     res = requests.get(ifExistsUrl)
     if res.status_code == 200:
         if res.json()['hits']['total'] == 0:
-            print(f"Record with pubID {pubID} does not exist")
-            print("This should mean record is new")
-            print("This should NOT happend check with MIS group")
+            logger.info(f"Record with pubID {pubID} does not exist")
+            logger.info("This should mean record is new")
+            logger.info("This should NOT happend check with MIS group")
             uploadNew()
-            return False
+            return True
         if res.json()['hits']['total'] !=0:
             recordID = res.json()['hits']['hits'][0]["id"]
             createNewVersionURL = f'{INVENIOHOST}/api/records/{recordID}/versions'
@@ -388,23 +402,45 @@ def uploadModify(invenioDict):
             newVersionRes = requests.post(createNewVersionURL,data=json.dumps(createNewVersionData), headers=h,verify=True)
             if newVersionRes.status_code == 200:
                 publishNewVersionURL = f'{INVENIOHOST}/api/records/{recordID}/draft/actions/publish'
-                publishNewVersionRes= requests.post(f'{INVENIOHOST}/api/records/{recordID}/draft/actions/publish',headers=h,verify=True)
+                publishNewVersionRes= requests.post(publishNewVersionURL,headers=h,verify=True)
                 if publishNewVersionRes.status_code == 202:
-                    print("success publish new version")
+                    logger.info("success publish new version")
                 else:
-                    print(publishNewVersionRes.status_code)
-                    print(publishNewVersionRes.json())
+                    logger.error(publishNewVersionRes.status_code)
+                    logger.error(publishNewVersionRes.json())
+                    return False
             else:
-                print(newVersionRes.status_code)
-                print(newVersionRes.json())
+                logger.error(newVersionRes.status_code)
+                logger.error(newVersionRes.json())
+                return False
     else:
-        print(res.status_code)
-        print(res.json())
+        logger.error(res.status_code)
+        logger.error(res.json())
+        return False
+    
+    return True
 
 
-def callPUBDB(submit_date_after = '', pub_year = '', modification_date = ''):
+def callPUBDB(action, submit_date_after = '', pub_year = '', modification_date = ''):
     if not any([submit_date_after, pub_year, modification_date]):
         return "OK"
+    
+    isModify = False
+    isNew = False
+
+    if action == "new":
+        if not submit_date_after:
+            logger.error("submit_date_after is needed for action new")
+            return False
+        isNew = True
+    elif action == "modify":
+        if not modification_date:
+            logger.error("modification_date is needed for action modify")
+            return False
+        isModify = True
+    else:
+        logger.error(f"action {action} not recognized. Available action: new or modify")
+        return False
 
     invenioDictList = []
     pubDBURL = 'https://misportal.jlab.org/sti/publications/search.json'
@@ -447,10 +483,15 @@ def callPUBDB(submit_date_after = '', pub_year = '', modification_date = ''):
             modification_date   = data["modification_date"]
             submit_date = data["submit_date"]
             if submit_date == modification_date:
-                useModify = True
+                isSMDateSame = False
             else:
-                useModify = False
+                isSMDateSame = True
             jsonRecordURLList.append(json_record_url)
+    else:
+        logger.error(pubDBRes.status_code)
+        logger.error(pubDBRes.json())
+        return False
+
     for URL in jsonRecordURLList:
         pubDBResEachJSON = requests.get(URL)
         if pubDBResEachJSON.status_code == 200:
@@ -458,14 +499,27 @@ def callPUBDB(submit_date_after = '', pub_year = '', modification_date = ''):
             invenioDict = transform(dataJSON)
             invenioDictList.append(invenioDict)
     
-    if useModify:
-        for toupload in invenioDictList:
-            uploadModify(toupload)
+    if isModify:
+        if not isSMDateSame:
+            logger.info("modification_date is same as submit_date. So no need to use action modify")
+            return False
+        else:
+            logger.info("modification_date is different from submit_date. So use action modify")
+            for toMod in invenioDictList:
+                upload_modify = uploadModify(toMod)
     else:
-        for toupload in invenioDictList:
-            uploadNew(toupload)
+        for toUp in invenioDictList:
+            upload_new = uploadNew(toUp)
+    return True
 
-    return "OK"
+
+yesterday = datetime.now() - timedelta(days=1)
+yesterday_str = yesterday.strftime("%Y-%m-%d")
+
+# First call with submit_date_after of yesterday
+callPUBDB("new", submit_date_after=yesterday_str)
+callPUBDB("modify", modification_date=yesterday_str)
+
 
 
 
