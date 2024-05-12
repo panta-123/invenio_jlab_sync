@@ -519,26 +519,3 @@ yesterday_str = yesterday.strftime("%Y-%m-%d")
 # First call with submit_date_after of yesterday
 callPUBDB("new", submit_date_after=yesterday_str)
 callPUBDB("modify", modification_date=yesterday_str)
-
-
-
-
-
-
-
-
-
-
-
-
-        
-    
-        
-    
-    
-
-
-
-
-
-
