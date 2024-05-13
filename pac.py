@@ -60,6 +60,17 @@ def cleanedName(fullname):
     last_name = names[-1]
     return {"type": "personal", "given_name":first_name, "family_name":last_name}
 
+def getExpIDset(fullname):
+    expIDSet = set()
+    experimentNumberList = []
+    expIDpattern = r'\d+'
+    expIDSplits= re.findall(expIDpattern, fullname)
+    if expIDSplits:
+        expID = int(''.join(expIDSplits))
+        expIDSet.add(expID)
+    experimentNumberList.append(fullname)
+    return expIDSet
+
 def getAuthorDict(authors, spokesperson=False, contactPerson=False):
     author_list = []
     roleID = "researcher"
@@ -209,12 +220,17 @@ def transform(entry):
         linkDict = getLinksDict(entry["links"])
         inveniodict["metadata"].update(linkDict)
     
+    expIDs = set()
     if entry["attachments"]:
         attachmentDict = getAttachmentDict(entry["attachments"])
         inveniodict["metadata"].update(attachmentDict)
+    if entry.get("proposal_number",""):
+        inveniodict["custom_fields"].update({"pac:pac_number": entry.get('proposal_number')})
+        expID = getExpIDset(entry["expID"])
+        expIDs.update(expID)
+    
 
     inveniodict["custom_fields"].update({"pac:pac_number": int(entry.get('pac_number')),
-                                         "pac:proposal_number": entry.get("proposal_number",""),
                                          "pac:pacID": entry.get("id","")
                                          })
     beam_days = entry.get("beam_days","")
@@ -232,6 +248,12 @@ def transform(entry):
     experiment_number = entry.get("experiment_number","")
     if experiment_number:
         inveniodict["custom_fields"].update({"pac:experiment_number": experiment_number})
+        expID = getExpIDset(entry["proposal_number"])
+        expIDs.update(expID)
+
+    if expIDs:
+        inveniodict["custom_fields"].update({"rdm:expID": list(expIDs)})
+
     
     experimental_hall = entry.get("experiment_hall","")
     if experimental_hall:

@@ -72,6 +72,21 @@ def getPublicationDate(publication_date):
         publication_date = publication_date.split()[-1]
     return publication_date
 
+def getExperimentDict(experimentList):
+    expIDList = []
+    experimentNumberList = []
+    for experiment in experimentList:
+        experimentNumber = experiment.get('paperid',"")
+        expIDpattern = r'\d+'
+        expIDSplits= re.findall(expIDpattern, experimentNumber)
+        if expIDSplits:
+            expID = int(''.join(expIDSplits))
+            expIDList.append(expID)
+        experimentNumberList.append(experimentNumber)
+    returnDict = {"rdm:experiment_number": experimentNumberList, "rdm:expID": list(set(expIDList))}
+    return returnDict
+
+
 def getDivisionDict(division):
     if not division:
         return {"rdm:division": [{"id": "OTHERS"}]}
@@ -254,7 +269,7 @@ def getDocumentDict(entry):
                 volume = entry.get('volume',"")
                 issue = entry.get('issue',"")
                 pages = entry.get('pages',"")
-                returnDict["custom_fields"]["journal:journal"]= {"title": journal_name, "issue": issue, 
+                returnDict["custom_fields"]["journal:journal"]= {"title": journal_name, "issue": issue,
                                                     "volume": volume,"pages": pages}
 
         elif document_type.lower() == "other":
@@ -297,7 +312,7 @@ def transform(entry):
     lanl_number = entry.get("lanl_number", None)
     if lanl_number:
          inveniodict["custom_fields "].update({"rdm:lanl_number": lanl_number})
-    
+
     inveniodict["custom_fields "].update({"rdm:pubID": entry["pub_id"]})
 
     if "ldrd_funding" in entry:
@@ -307,14 +322,17 @@ def transform(entry):
             ldrdDict = getLDRDDict(entry["ldrd_funding"])
         inveniodict["custom_fields"].update(ldrdDict)
     
-    
+    if entry.get("experiments",""):
+        experimentDict = getExperimentDict(entry["experiments"])
+        inveniodict["custom_fields"].update(experimentDict)
+
     if entry["attachments"]:
         attachmentDict = getAttachmentDict(entry["attachments"])
         inveniodict["metadata"].update(attachmentDict)
     if entry["links"]:
         linkDict = getLinksDict(entry["links"])
         inveniodict["metadata"].update(linkDict)
-    
+
     inveniodict["metadata"].update(getRightsDict())
     inveniodict["metadata"].update(getAccessDict())
     inveniodict["communities"] =  {"ids": [COMMUNITYID]}
@@ -330,7 +348,7 @@ def transform(entry):
                                                         "role": {
                                                             "id": "other",
                                                             "title": {"en": "Other"}}}
-    
+
     documentDict = getDocumentDict(entry)
     inveniodict["metadata"].update(documentDict["metadata"])
     inveniodict["custom_fields"].update(documentDict["custom_fields"])
@@ -417,14 +435,13 @@ def uploadModify(invenioDict):
         logger.error(res.status_code)
         logger.error(res.json())
         return False
-    
     return True
 
 
 def callPUBDB(action, submit_date_after = '', pub_year = '', modification_date = ''):
     if not any([submit_date_after, pub_year, modification_date]):
         return "OK"
-    
+
     isModify = False
     isNew = False
 
@@ -498,18 +515,19 @@ def callPUBDB(action, submit_date_after = '', pub_year = '', modification_date =
             dataJSON = pubDBResEachJSON.json()
             invenioDict = transform(dataJSON)
             invenioDictList.append(invenioDict)
-    
+
     if isModify:
         if not isSMDateSame:
-            logger.info("modification_date is same as submit_date. So no need to use action modify")
-            return False
+            for tomod in invenioDictList:
+                upload_modify = uploadModify(tomod)
+            return True
         else:
-            logger.info("modification_date is different from submit_date. So use action modify")
-            for toMod in invenioDictList:
-                upload_modify = uploadModify(toMod)
+            logger.info("modification_date is same as submit_date. No need to do anything.")
     else:
-        for toUp in invenioDictList:
-            upload_new = uploadNew(toUp)
+        for toup in invenioDictList:
+            upload_new = uploadNew(toup)
+            logger.info("Succesfully handles new records.")
+        
     return True
 
 
