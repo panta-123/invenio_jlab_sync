@@ -19,7 +19,7 @@ logger.addHandler(handler)
 
 INVENIOHOST = "https://inveniordm.jlab.org"
 TOKEN = ""
-COMMUNITYID = "2133e693-e129-43e8-a436-bc35e1d49052"
+COMMUNITYID = "56b05239-aabb-43db-aae8-101ceebc105b"
 
 h = {
         "Accept": "application/json",
@@ -66,7 +66,7 @@ def cleanedName(fullname):
 
 def getPublicationDate(publication_date):
     try:
-        date_obj = datetime.strptime('December 2015', '%B %Y')
+        date_obj = datetime.strptime(publication_date, '%B %Y')
         publication_date = date_obj.strftime('%Y-%m')
     except Exception as err:
         publication_date = publication_date.split()[-1]
@@ -80,7 +80,7 @@ def getExperimentDict(experimentList):
         expIDpattern = r'\d+'
         expIDSplits= re.findall(expIDpattern, experimentNumber)
         if expIDSplits:
-            expID = int(''.join(expIDSplits))
+            expID = ''.join(expIDSplits)
             expIDList.append(expID)
         experimentNumberList.append(experimentNumber)
     returnDict = {"rdm:experiment_number": experimentNumberList, "rdm:expID": list(set(expIDList))}
@@ -207,7 +207,7 @@ def getLDRDDict(ldrd, proposals= []):
     return returnDict
 
 def getDocumentDict(entry):
-    returnDict = {"metadata":{},"custom_fields":{}}
+    returnDict = {"metadata":{"contributors" : []},"custom_fields":{}}
     if 'document_type' in entry:
         document_type = entry['document_type']
         if document_type.lower() == "journal article":
@@ -299,21 +299,21 @@ def transform(entry):
 
     division = entry.get('affiliation', "")
     divisionDict = getDivisionDict(division)
-    inveniodict["custom_fields "].update(divisionDict)
+    inveniodict["custom_fields"].update(divisionDict)
 
     jlab_number = entry.get("jlab_number",None)
     if jlab_number:
-        inveniodict["custom_fields "].update({"rdm:jlab_number": jlab_number})
+        inveniodict["custom_fields"].update({"rdm:jlab_number": jlab_number})
 
     osti_number = entry.get("osti_number", None)
     if osti_number:
-        inveniodict["custom_fields "].update({"rdm:osti_number": osti_number})
+        inveniodict["custom_fields"].update({"rdm:osti_number": osti_number})
 
     lanl_number = entry.get("lanl_number", None)
     if lanl_number:
-         inveniodict["custom_fields "].update({"rdm:lanl_number": lanl_number})
+         inveniodict["custom_fields"].update({"rdm:lanl_number": lanl_number})
 
-    inveniodict["custom_fields "].update({"rdm:pubID": entry["pub_id"]})
+    inveniodict["custom_fields"].update({"rdm:pubID": int(entry["pub_id"])})
 
     if "ldrd_funding" in entry:
         if entry["proposals"]:
@@ -334,7 +334,7 @@ def transform(entry):
         inveniodict["metadata"].update(linkDict)
 
     inveniodict["metadata"].update(getRightsDict())
-    inveniodict["metadata"].update(getAccessDict())
+    inveniodict.update(getAccessDict())
     inveniodict["communities"] =  {"ids": [COMMUNITYID]}
 
 
@@ -416,16 +416,30 @@ def uploadModify(invenioDict):
         if res.json()['hits']['total'] !=0:
             recordID = res.json()['hits']['hits'][0]["id"]
             createNewVersionURL = f'{INVENIOHOST}/api/records/{recordID}/versions'
-            createNewVersionData = {}
-            newVersionRes = requests.post(createNewVersionURL,data=json.dumps(createNewVersionData), headers=h,verify=True)
-            if newVersionRes.status_code == 200:
-                publishNewVersionURL = f'{INVENIOHOST}/api/records/{recordID}/draft/actions/publish'
-                publishNewVersionRes= requests.post(publishNewVersionURL,headers=h,verify=True)
-                if publishNewVersionRes.status_code == 202:
-                    logger.info("success publish new version")
+            newVersionRes = requests.post(createNewVersionURL,data={}, headers=h,verify=True)
+            new_data = newVersionRes.json()
+            new_data["metadata"]["publication_date"] =  "2020-04"
+            print(new_data)
+            print("\n")
+            if newVersionRes.status_code in [200, 201]:
+                updatedraftRecordURL =  newVersionRes.json()['links']["self"] #f'{INVENIOHOST}/api/records/{recordID}/draft'
+                updatedraftRecord = requests.put(updatedraftRecordURL,data=json.dumps(new_data), headers=h,verify=True)
+                if updatedraftRecord.status_code == 200:
+                    logger.info("success update draft record")
+                    print(updatedraftRecord.json())
+                    publishNewVersionURL =updatedraftRecord.json()['links']["publish"]  #f'{INVENIOHOST}/api/records/{recordID}/draft/actions/publish'
+                    publishNewVersionRes= requests.post(publishNewVersionURL,headers=h,verify=True)
+                    if publishNewVersionRes.status_code == 202:
+                        logger.info("success publish new version")
+                    else:
+                        logger.error("publish error")
+                        logger.error(publishNewVersionRes.status_code)
+                        logger.error(publishNewVersionRes.json())
+                        return False
                 else:
-                    logger.error(publishNewVersionRes.status_code)
-                    logger.error(publishNewVersionRes.json())
+                    logger.error("update draft")
+                    logger.error(updatedraftRecord.status_code)
+                    logger.error(updatedraftRecord.json())
                     return False
             else:
                 logger.error(newVersionRes.status_code)
@@ -436,7 +450,6 @@ def uploadModify(invenioDict):
         logger.error(res.json())
         return False
     return True
-
 
 def callPUBDB(action, submit_date_after = '', pub_year = '', modification_date = ''):
     if not any([submit_date_after, pub_year, modification_date]):
