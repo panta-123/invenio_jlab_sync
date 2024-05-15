@@ -5,7 +5,7 @@ import re
 from datetime import datetime, timedelta
 import logging
 from logging.handlers import RotatingFileHandler
-
+import idutils
 # Set up logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -19,7 +19,7 @@ logger.addHandler(handler)
 
 INVENIOHOST = "https://inveniordm.jlab.org"
 TOKEN = ""
-COMMUNITYID = "56b05239-aabb-43db-aae8-101ceebc105b"
+COMMUNITYID = "c082a353-8c1c-46bd-a45d-d2293f2fb5aa"
 
 h = {
         "Accept": "application/json",
@@ -119,17 +119,11 @@ def getAuthorDict(authors):
                 institution_fullname = institution
             if not institution_fullname:
                 authdict = {"person_or_org":authorNameDict,
-                            "role": {"id": "researcher", 
-                                    "title": 
-                                    {"de": "WissenschaftlerIn",
-                                    "en": "Researcher"}},}
+                            "role": {"id": "researcher"}}
             else:
                 authdict = {"person_or_org":authorNameDict,
                             "affiliations":[{"name":institution_fullname}],
-                            "role": {"id": "researcher", 
-                                    "title": 
-                                    {"de": "WissenschaftlerIn",
-                                    "en": "Researcher"}},}
+                            "role": {"id": "researcher"}}
             author_list.append(authdict)
     returnDict = {"creators" : author_list}
     return returnDict
@@ -206,6 +200,10 @@ def getLDRDDict(ldrd, proposals= []):
             returnDict["rdm:ldrd_number"] = ldrd_num
     return returnDict
 
+def fundingDict(funding):
+    returnDict = {}
+    return returnDict
+
 def getDocumentDict(entry):
     returnDict = {"metadata":{"contributors" : []},"custom_fields":{}}
     if 'document_type' in entry:
@@ -222,21 +220,21 @@ def getDocumentDict(entry):
             returnDict["metadata"]["resource_type"] = {"id": "publication-thesis"}
             awarding_university = entry["primary_institution"].split(",")[0]
             returnDict["custom_fields"]["thesis:university"] = awarding_university
-            advisorList= entry["theses"]
+            advisorList= entry.get("theses","")
+
             if advisorList:
-                author_invenio_list = []
+                advisor_invenio_list = []
                 for advisor in advisorList:
-                    advisor_name = advisor["advisor"]
-                    advisor_affiliation = advisor['institution']
+                    advisor_name = advisor.get("advisor","")
+                    advisor_affiliation = advisor.get('institution',"")
                     if advisor_name:
                         advisorNameDict = cleanedName(advisor_name)
                         advidict = {"person_or_org":advisorNameDict,
-                                "role": {"id": "supervisor",
-                                        "title": {
-                                            "en": "Supervisor"
-                                            }},}
-                        author_invenio_list.append(advidict)
-                returnDict["metadata"]["contributors"].append(advisorNameDict)
+                                "role": {"id": "supervisor"}}
+                        if advisor_affiliation:
+                            advidict["affiliations"] = [{"name": advisor_affiliation}]
+                        advisor_invenio_list.append(advidict)
+                returnDict["metadata"]["contributors"]+= advisor_invenio_list
 
         elif document_type.lower() == "book":
             returnDict["metadata"]["resource_type"] = {"id": "publication-book"}
@@ -280,7 +278,7 @@ def getDocumentDict(entry):
 
 
 def transform(entry):
-    inveniodict = {"metadata": {},"custom_fields": {}}
+    inveniodict = {"metadata": {"related_identifiers":[], "identifiers":[]},"custom_fields": {}}
 
     submit_date = entry['submit_date']
     inveniodict["metadata"]["dates"] = [{"date": submit_date,
@@ -308,10 +306,21 @@ def transform(entry):
     osti_number = entry.get("osti_number", None)
     if osti_number:
         inveniodict["custom_fields"].update({"rdm:osti_number": osti_number})
+        
 
     lanl_number = entry.get("lanl_number", None)
     if lanl_number:
-         inveniodict["custom_fields"].update({"rdm:lanl_number": lanl_number})
+        detected_schemes = idutils.detect_identifier_schemes(lanl_number)
+        if detected_schemes:
+            # If other schemas are present, add them to identifiers list
+            other_schemas = [schema for schema in detected_schemes if schema != "url"]
+            if other_schemas:
+                for schema in other_schemas:
+                    inveniodict["metadata"]["identifiers"].append({"identifier": lanl_number, "scheme": schema})
+            else:
+                # If only "url" is detected, add the DOI link as a URL
+                inveniodict["metadata"]["identifiers"].append({"identifier": lanl_number, "scheme": "url"})
+        
 
     inveniodict["custom_fields"].update({"rdm:pubID": int(entry["pub_id"])})
 
@@ -328,10 +337,11 @@ def transform(entry):
 
     if entry["attachments"]:
         attachmentDict = getAttachmentDict(entry["attachments"])
-        inveniodict["metadata"].update(attachmentDict)
+        inveniodict["metadata"]["related_identifiers"]  += attachmentDict["related_identifiers"]
+
     if entry["links"]:
         linkDict = getLinksDict(entry["links"])
-        inveniodict["metadata"].update(linkDict)
+        inveniodict["metadata"]["related_identifiers"]  += linkDict["related_identifiers"]
 
     inveniodict["metadata"].update(getRightsDict())
     inveniodict.update(getAccessDict())
@@ -346,14 +356,33 @@ def transform(entry):
         inveniodict["metadata"]["creators"] = {"person_or_org": {"type": "organizational",
                                                         "name": "Thomas Jefferson National Accelerator Facility"},
                                                         "role": {
-                                                            "id": "other",
-                                                            "title": {"en": "Other"}}}
+                                                            "id": "other"}}
 
     documentDict = getDocumentDict(entry)
     inveniodict["metadata"].update(documentDict["metadata"])
+    doi_link = entry.get("doi_link", "")
+    if doi_link:
+        # check which schema it is from
+        detected_schemes = idutils.detect_identifier_schemes(doi_link)
+        if detected_schemes:
+            # If other schemas are present, add them to identifiers list
+            other_schemas = [schema for schema in detected_schemes if schema != "url"]
+            if other_schemas:
+                for schema in other_schemas:
+                    inveniodict["metadata"]["identifiers"].append({"identifier": doi_link, "scheme": schema})
+            else:
+                # If only "url" is detected, add the DOI link as a URL
+                inveniodict["metadata"]["identifiers"].append({"identifier": doi_link, "scheme": "url"})
+
     inveniodict["custom_fields"].update(documentDict["custom_fields"])
 
     return inveniodict
+
+def writeToFile(data, file= "defaultName"):
+    timestamp = datetime.now().strftime("%Y-%m-%d")
+    filename = f"{file}_{timestamp}.json"
+    with open(filename, "w") as file:
+        json.dump(data, file)
 
 def uploadNew(invenioDict):
     pubID = invenioDict["custom_fields"]["rdm:pubID"]
@@ -363,41 +392,42 @@ def uploadNew(invenioDict):
         if res.json()['hits']['total'] != 0:
             logger.info(f"Record with pubID {pubID} already exists")
             return False
-    if res.json()['hits']['total'] == 0:
-        createURL = f"{INVENIOHOST}/api/records"
-        createRes = requests.post(createURL, data=json.dumps(invenioDict), headers=h,verify=True)
-        if createRes.status_code == 201:
-            record_id = createRes.json()['id']
-            reviewURL = f'{INVENIOHOST}/api/records/{record_id}/draft/review'
-            reviewData = {"receiver": { "community": COMMUNITYID},"type": "community-submission"}
-            reviewRes = requests.put(reviewURL, data=json.dumps(reviewData), headers=h,verify=True)
-            if reviewRes.status_code == 200:
-                submitData =  {"payload": {"content": "Thank you in advance for the review.","format": "html"}}
-                submitURL = reviewRes.json()['links']['actions']['submit']
-                submitRes = requests.post(submitURL, data=json.dumps(submitData), headers=h,verify=True)
-                if submitRes.status_code in [202, 200]:
-                        logger.info("success submit for review")
-                        acceptURL = submitRes.json()['links']['actions']['accept']
-                        acceptData = {"payload": {"content": "You are in!", "format": "html"}}
-                        acceptRes = requests.post(acceptURL, data=json.dumps(acceptData), headers=h,verify=True)
-                        if acceptRes.status_code in [202, 200]:
-                            logger.info("Whole upload, review, submit and accept OK")
-                        else:
-                            logger.info(acceptRes.status_code)
-                            logger.info(acceptRes.json())
-                            return False
+        if res.json()['hits']['total'] == 0:
+            createURL = f"{INVENIOHOST}/api/records"
+            createRes = requests.post(createURL, data=json.dumps(invenioDict), headers=h,verify=True)
+            if createRes.status_code == 201:
+                record_id = createRes.json()['id']
+                reviewURL = f'{INVENIOHOST}/api/records/{record_id}/draft/review'
+                reviewData = {"receiver": { "community": COMMUNITYID},"type": "community-submission"}
+                reviewRes = requests.put(reviewURL, data=json.dumps(reviewData), headers=h,verify=True)
+                if reviewRes.status_code == 200:
+                    submitData =  {"payload": {"content": "Thank you in advance for the review.","format": "html"}}
+                    submitURL = reviewRes.json()['links']['actions']['submit']
+                    submitRes = requests.post(submitURL, data=json.dumps(submitData), headers=h,verify=True)
+                    if submitRes.status_code in [202, 200]:
+                            logger.info("success submit for review")
+                            acceptURL = submitRes.json()['links']['actions']['accept']
+                            acceptData = {"payload": {"content": "You are in!", "format": "html"}}
+                            acceptRes = requests.post(acceptURL, data=json.dumps(acceptData), headers=h,verify=True)
+                            if acceptRes.status_code in [202, 200]:
+                                logger.info("Whole upload, review, submit and accept OK")
+                            else:
+                                logger.info(acceptRes.status_code)
+                                logger.info(acceptRes.json())
+                                return False
+                    else:
+                        logger.error(submitRes.status_code)
+                        logger.error(submitRes.json())
+                        return False
                 else:
-                    logger.error(submitRes.status_code)
-                    logger.error(submitRes.json())
+                    logger.error(reviewRes.status_code)
+                    logger.error(reviewRes.json())
                     return False
             else:
-                logger.error(reviewRes.status_code)
-                logger.error(reviewRes.json())
+                logger.error(createRes.status_code)
+                logger.error(createRes.json())
+                writeToFile(invenioDict, file="failed_to_create_draft")
                 return False
-        else:
-            logger.error(createRes.status_code)
-            logger.error(createRes.json())
-            return False
 
     return True
 
@@ -410,23 +440,20 @@ def uploadModify(invenioDict):
         if res.json()['hits']['total'] == 0:
             logger.info(f"Record with pubID {pubID} does not exist")
             logger.info("This should mean record is new")
-            logger.info("This should NOT happend check with MIS group")
-            uploadNew()
+            logger.info("This should NOT happen but we will register it as new.")
+            uploadNew(invenioDict)
             return True
         if res.json()['hits']['total'] !=0:
             recordID = res.json()['hits']['hits'][0]["id"]
             createNewVersionURL = f'{INVENIOHOST}/api/records/{recordID}/versions'
             newVersionRes = requests.post(createNewVersionURL,data={}, headers=h,verify=True)
             new_data = newVersionRes.json()
-            new_data["metadata"]["publication_date"] =  "2020-04"
-            print(new_data)
-            print("\n")
+            new_data.update(invenioDict)
             if newVersionRes.status_code in [200, 201]:
                 updatedraftRecordURL =  newVersionRes.json()['links']["self"] #f'{INVENIOHOST}/api/records/{recordID}/draft'
                 updatedraftRecord = requests.put(updatedraftRecordURL,data=json.dumps(new_data), headers=h,verify=True)
                 if updatedraftRecord.status_code == 200:
                     logger.info("success update draft record")
-                    print(updatedraftRecord.json())
                     publishNewVersionURL =updatedraftRecord.json()['links']["publish"]  #f'{INVENIOHOST}/api/records/{recordID}/draft/actions/publish'
                     publishNewVersionRes= requests.post(publishNewVersionURL,headers=h,verify=True)
                     if publishNewVersionRes.status_code == 202:
@@ -444,6 +471,7 @@ def uploadModify(invenioDict):
             else:
                 logger.error(newVersionRes.status_code)
                 logger.error(newVersionRes.json())
+                writeToFile(invenioDict, file="failed_to_create_new_version")
                 return False
     else:
         logger.error(res.status_code)
@@ -451,26 +479,10 @@ def uploadModify(invenioDict):
         return False
     return True
 
+
 def callPUBDB(action, submit_date_after = '', pub_year = '', modification_date = ''):
     if not any([submit_date_after, pub_year, modification_date]):
         return "OK"
-
-    isModify = False
-    isNew = False
-
-    if action == "new":
-        if not submit_date_after:
-            logger.error("submit_date_after is needed for action new")
-            return False
-        isNew = True
-    elif action == "modify":
-        if not modification_date:
-            logger.error("modification_date is needed for action modify")
-            return False
-        isModify = True
-    else:
-        logger.error(f"action {action} not recognized. Available action: new or modify")
-        return False
 
     invenioDictList = []
     pubDBURL = 'https://misportal.jlab.org/sti/publications/search.json'
@@ -510,12 +522,6 @@ def callPUBDB(action, submit_date_after = '', pub_year = '', modification_date =
         dataList = dataJSON["data"]
         for  data in dataList:
             json_record_url = data["json_record_url"]
-            modification_date   = data["modification_date"]
-            submit_date = data["submit_date"]
-            if submit_date == modification_date:
-                isSMDateSame = False
-            else:
-                isSMDateSame = True
             jsonRecordURLList.append(json_record_url)
     else:
         logger.error(pubDBRes.status_code)
@@ -528,18 +534,8 @@ def callPUBDB(action, submit_date_after = '', pub_year = '', modification_date =
             dataJSON = pubDBResEachJSON.json()
             invenioDict = transform(dataJSON)
             invenioDictList.append(invenioDict)
-
-    if isModify:
-        if not isSMDateSame:
-            for tomod in invenioDictList:
-                upload_modify = uploadModify(tomod)
-            return True
-        else:
-            logger.info("modification_date is same as submit_date. No need to do anything.")
-    else:
-        for toup in invenioDictList:
-            upload_new = uploadNew(toup)
-            logger.info("Succesfully handles new records.")
+    for invenioDict in invenioDictList:
+        res = uploadModify(invenioDict)
         
     return True
 
@@ -549,4 +545,4 @@ yesterday_str = yesterday.strftime("%Y-%m-%d")
 
 # First call with submit_date_after of yesterday
 callPUBDB("new", submit_date_after=yesterday_str)
-callPUBDB("modify", modification_date=yesterday_str)
+#callPUBDB("modify", modification_date=yesterday_str)

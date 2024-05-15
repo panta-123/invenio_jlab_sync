@@ -19,7 +19,7 @@ logger.addHandler(handler)
 
 INVENIOHOST = "https://inveniordm.jlab.org"
 TOKEN = ""
-COMMUNITYID = "33017028-77cc-4709-bf42-aa0767cbe74e"
+COMMUNITYID = "7b99f013-91fa-4274-98ec-b465245ef779"
 
 h = {
         "Accept": "application/json",
@@ -66,38 +66,131 @@ def getExpIDset(fullname):
     expIDpattern = r'\d+'
     expIDSplits= re.findall(expIDpattern, fullname)
     if expIDSplits:
-        expID = int(''.join(expIDSplits))
+        expID = ''.join(expIDSplits)
         expIDSet.add(expID)
     experimentNumberList.append(fullname)
     return expIDSet
 
-def getAuthorDict(authors, spokesperson=False, contactPerson=False):
-    author_list = []
-    roleID = "researcher"
-    metaKey = "creators"
-    for author in authors:
-        authorNameDict = {"type": "personal", "given_name":author["first_name"], "family_name":author["last_name"]}
-        institution = author.get('institution',"")
-        if spokesperson:
-            roleID = "projectleader"
-            metaKey = "contributors"
-        if contactPerson:
-            roleID = "contactperson"
-            metaKey = "contributors"
-        authdict = {"person_or_org":authorNameDict, "role": {"id": roleID}}
-        if institution:
-            if institution.lower() == "jefferson lab":
-                        institution = "Thomas Jefferson National Accelerator Facility"
-            elif institution.lower() == "jlab":
-                institution = "Thomas Jefferson National Accelerator Facility"
-            else:
-                 institution = institution
-            authdict["affiliations"] = [{"name":institution}]
-        author_list.append(authdict)
-    returnDict = {metaKey : author_list}
-    return returnDict
+def processCreators(entry):
+    creators = []
+    seen_names = set()
 
-def statusID(status):
+    # Combine authors, spokespersons, and contact person into creators list
+    authors = entry.get("authors", [])
+    spokespersons = entry.get("spokespersons", [])
+    contact_person = entry.get("contact_person", {})
+
+    # Add authors to creators list
+    for author in authors:
+        name = (author["first_name"], author["last_name"])
+        if name not in seen_names:
+            cDict = {
+                "person_or_org": {"type": "personal",
+                "given_name": author["first_name"],
+                "family_name": author["last_name"]},
+                "role": {"id":"researcher"}
+            }
+            institution = author.get("institution","")
+            if institution:
+                if institution.lower() == "jefferson jab":
+                    institution_fullname = "Thomas Jefferson National Accelerator Facility"
+                elif institution.lower() == "jlab":
+                     institution_fullname = "Thomas Jefferson National Accelerator Facility"
+                else:
+                    institution_fullname = institution
+                cDict["affiliations"] = [{"name":institution_fullname}]
+            creators.append(cDict)
+            seen_names.add(name)
+
+    # Add spokespersons to creators list
+    for spokesperson in spokespersons:
+        name = (spokesperson["first_name"], spokesperson["last_name"])
+        if name not in seen_names:
+            cDict = {
+                "person_or_org": {"type": "personal",
+                "given_name": spokesperson["first_name"],
+                "family_name": spokesperson["last_name"]},
+                "role": {"id":"researcher"}
+            }
+            institution = spokesperson.get("institution","")
+            if institution:
+                if institution.lower() == "jefferson jab":
+                    institution_fullname = "Thomas Jefferson National Accelerator Facility"
+                elif institution.lower() == "jlab":
+                     institution_fullname = "Thomas Jefferson National Accelerator Facility"
+                else:
+                    institution_fullname = institution
+                cDict["affiliations"] = [{"name":institution_fullname}]
+            creators.append(cDict)
+            seen_names.add(name)
+
+    # Extract first and last names for contact person
+    if contact_person:
+        contact_fullname = contact_person.get("name", "")
+        if contact_fullname:
+            names = contact_fullname.split()
+            first_name = ' '.join(names[:-1])
+            last_name = names[-1]
+            contact_name = (first_name, last_name)
+            if contact_name not in seen_names:
+                cDict = {
+                    "person_or_org": {"type": "personal",
+                    "given_name": first_name,
+                    "family_name": last_name},
+                    "role": {"id":"researcher"}
+                }
+                institution = contact_person.get("institution","")
+                if institution:
+                    if institution.lower() == "jefferson lab":
+                        institution_fullname = "Thomas Jefferson National Accelerator Facility"
+                    elif institution.lower() == "jlab":
+                        institution_fullname = "Thomas Jefferson National Accelerator Facility"
+                    else:
+                        institution_fullname = institution
+                    cDict["affiliations"] = [{"name":institution_fullname}]
+                creators.append(cDict)
+    if not creators:
+        cDict = {
+            "person_or_org" : {"type": "personal",
+            "given_name": "None Listed",
+            "family_name": ""},
+            "role": {"id":"researcher"}}
+        creators.append(cDict)
+    return {"creators": creators}
+
+def processProjectLeaders(entry):
+    projectleaders = {"contributors": []}
+
+    # Combine spokespersons and contact person into projectleaders list
+    spokespersons = entry.get("spokespersons", [])
+    contact_person = entry.get("contact_person", {})
+
+    # Add spokespersons to projectleaders list
+    for spokesperson in spokespersons:
+        projectleaders["contributors"].append({
+            "person_or_org":{"type": "personal",
+            "given_name": spokesperson["first_name"],
+            "family_name": spokesperson["last_name"]},
+            "role": {"id": "projectleader"}
+        })
+
+    # Extract first and last names for contact person in projectleaders list
+    if contact_person:
+        contact_fullname = contact_person.get("name", "")
+        if contact_fullname:
+            names = contact_fullname.split()
+            first_name = ' '.join(names[:-1])
+            last_name = names[-1]
+            projectleaders["contributors"].append({
+               "person_or_org": {"type": "personal",
+                "given_name": first_name,
+                "family_name": last_name},
+                "role": {"id": "projectleader"}
+            })
+
+    return projectleaders
+
+def getstatusID(status):
     statusID = None
     try:
         pattern = r'^.*[:\-]\s*|\s*\(.+'
@@ -126,42 +219,30 @@ def getLinksDict(links):
     isderivedfromdict =  { "identifier": html_record_url,
                             "scheme": "url",
                             "relation_type": {
-                                "id": "isderivedfrom",
-                                "title": {
-                                    "de": "Wird abgeleitet von",
-                                    "en": "Is derived from"
-                                    }
+                                "id": "isderivedfrom"
                             }
                         }
     returnDict = {"related_identifiers": [isderivedfromdict]}
     return returnDict
 
-def getAttachmentDict(attachments):
-    isdocumentedbyList = []
-    for attachment in attachments:
-        attachment_url = attachment["url"]
-        isdocumentedbydict = { "identifier": attachment_url,
-                            "scheme": "url",
-                            "relation_type": {
-                                "id": "isdocumentedby",
-                                "title": {
-                                    "de": "Wird dokumentiert von",
-                                    "en": "Is documented by"
+def getAttachmentDict(links):
+    pdf_record_url = links["proposal_pdf_url"]
+    isdocumentedbydict = { "identifier": pdf_record_url,
+                                "scheme": "url",
+                                "relation_type": {
+                                    "id": "isdocumentedby"}
                                 }
-                            }
-                        }
-        isdocumentedbyList.append(isdocumentedbydict)
-    returnDict = {"related_identifiers": isdocumentedbyList}
+    returnDict = {"related_identifiers": [isdocumentedbydict]}
     return returnDict
 
 def getDivisionID(exp_hall):
     divisionID = None
     for key, val in division_title_id.items():
-        if val.lower() == exp_hall.lower():
-            divisionID = key
+        if key.lower() == exp_hall.lower():
+            divisionID = val
             break
     if not divisionID:
-        divisionID = "OTHERS"
+        divisionID = "AORD"
     
     return divisionID
     
@@ -192,41 +273,30 @@ def getAccessDict():
     return returnDict
 
 def transform(entry):
-    inveniodict = {"metadata": {},"custom_fields": {}}
+    inveniodict = {"metadata": {"related_identifiers":[]},"custom_fields": {}}
     inveniodict["communities"] =  {"ids": [COMMUNITYID]}
 
     inveniodict["metadata"]["title"] = entry.get("title")
     inveniodict["metadata"]["resource_type"]= {"id": "publication-proposal"}
     inveniodict["metadata"]["publication_date"]= entry.get("submitted_date")
     inveniodict["metadata"].update(getRightsDict())
-    inveniodict["metadata"].update(getAccessDict())
+    inveniodict.update(getAccessDict())
 
-    authors = entry.get("authors", "")
-    if authors:
-        authorDict = getAuthorDict(authors)
-        inveniodict["metadata"].update(authorDict)
-    
-    spokespersons = entry["spokespersons"]
-    if spokespersons:
-        spokespersonDict = getAuthorDict(spokespersons, spokesperson=True)
-        inveniodict["metadata"].update(spokespersonDict)
-    
-    contactpersons = entry.get("contactpersons","")
-    if contactpersons:
-        contactpersonDict = getAuthorDict(contactpersons, contactPerson=True)
-        inveniodict["metadata"].update(contactpersonDict)
+    creatorsDict = processCreators(entry)
+    projectLeaderDict = processProjectLeaders(entry)
+    inveniodict["metadata"].update(creatorsDict)
+    inveniodict["metadata"].update(projectLeaderDict)
 
     if entry["links"]:
         linkDict = getLinksDict(entry["links"])
-        inveniodict["metadata"].update(linkDict)
+        inveniodict["metadata"]["related_identifiers"]  += linkDict["related_identifiers"]
+        pdflinkDict = getAttachmentDict(entry["links"])
+        inveniodict["metadata"]["related_identifiers"]  += pdflinkDict["related_identifiers"]
     
     expIDs = set()
-    if entry["attachments"]:
-        attachmentDict = getAttachmentDict(entry["attachments"])
-        inveniodict["metadata"].update(attachmentDict)
     if entry.get("proposal_number",""):
-        inveniodict["custom_fields"].update({"pac:pac_number": entry.get('proposal_number')})
-        expID = getExpIDset(entry["expID"])
+        inveniodict["custom_fields"].update({"pac:proposal_number": entry.get('proposal_number')})
+        expID = getExpIDset(entry["proposal_number"])
         expIDs.update(expID)
     
 
@@ -242,111 +312,124 @@ def transform(entry):
     
     status = entry.get("status","")
     if status:
-        statusID = statusID(status)
+        statusID = getstatusID(status)
         inveniodict["custom_fields"].update({"pac:pac_status": {"id": statusID}})
 
     experiment_number = entry.get("experiment_number","")
     if experiment_number:
-        inveniodict["custom_fields"].update({"pac:experiment_number": experiment_number})
-        expID = getExpIDset(entry["proposal_number"])
+        inveniodict["custom_fields"].update({"rdm:experiment_number": [experiment_number]})
+        expID = getExpIDset(experiment_number)
         expIDs.update(expID)
 
     if expIDs:
         inveniodict["custom_fields"].update({"rdm:expID": list(expIDs)})
 
-    
     experimental_hall = entry.get("experiment_hall","")
     if experimental_hall:
         divisonid = getDivisionID(experimental_hall)
         inveniodict["custom_fields"].update({"rdm:division": [{"id": divisonid}]})
-    
+
     return inveniodict
 
+def writeToFile(data, file= "defaultName"):
+    timestamp = datetime.now().strftime("%Y-%m-%d")
+    filename = f"{file}_{timestamp}.json"
+    with open(filename, "w") as file:
+        json.dump(data, file)
+
 def uploadNew(invenioDict):
-    pacID = invenioDict["custom_fields"]["rdm:pubID"]
-    ifExistsUrl = f'{INVENIOHOST}/api/records?q=custom_fields.rdm\\:pubID:"{pacID}"&l=list&p=1&s=10&sort=bestmatch'
+    pacID = invenioDict["custom_fields"]["pac:pacID"]
+    ifExistsUrl = f'{INVENIOHOST}/api/records?q=custom_fields.pac\\:pacID:"{pacID}"&l=list&p=1&s=10&sort=bestmatch'
     res = requests.get(ifExistsUrl)
     if res.status_code == 200:
         if res.json()['hits']['total'] != 0:
-            logger.info(f"Record with pubID {pacID} already exists")
+            logger.info(f"Record with pacID {pacID} already exists")
             return False
-    if res.json()['hits']['total'] == 0:
-        createURL = f"{INVENIOHOST}/api/records"
-        createRes = requests.post(createURL, data=json.dumps(invenioDict), headers=h,verify=True)
-        if createRes.status_code == 201:
-            record_id = createRes.json()['id']
-            reviewURL = f'{INVENIOHOST}/api/records/{record_id}/draft/review'
-            reviewData = {"receiver": { "community": COMMUNITYID},"type": "community-submission"}
-            reviewRes = requests.put(reviewURL, data=json.dumps(reviewData), headers=h,verify=True)
-            if reviewRes.status_code == 200:
-                submitData =  {"payload": {"content": "Thank you in advance for the review.","format": "html"}}
-                submitURL = reviewRes.json()['links']['actions']['submit']
-                submitRes = requests.post(submitURL, data=json.dumps(submitData), headers=h,verify=True)
-                if submitRes.status_code in [202, 200]:
-                        logger.info("success submit for review")
-                        acceptURL = submitRes.json()['links']['actions']['accept']
-                        acceptData = {"payload": {"content": "You are in!", "format": "html"}}
-                        acceptRes = requests.post(acceptURL, data=json.dumps(acceptData), headers=h,verify=True)
-                        if acceptRes.status_code in [202, 200]:
-                            logger.info("Whole upload, review, submit and accept OK")
-                        else:
-                            logger.info(acceptRes.status_code)
-                            logger.info(acceptRes.json())
-                            return False
+        if res.json()['hits']['total'] == 0:
+            createURL = f"{INVENIOHOST}/api/records"
+            createRes = requests.post(createURL, data=json.dumps(invenioDict), headers=h,verify=True)
+            if createRes.status_code == 201:
+                record_id = createRes.json()['id']
+                reviewURL = f'{INVENIOHOST}/api/records/{record_id}/draft/review'
+                reviewData = {"receiver": { "community": COMMUNITYID},"type": "community-submission"}
+                reviewRes = requests.put(reviewURL, data=json.dumps(reviewData), headers=h,verify=True)
+                if reviewRes.status_code == 200:
+                    submitData =  {"payload": {"content": "Thank you in advance for the review.","format": "html"}}
+                    submitURL = reviewRes.json()['links']['actions']['submit']
+                    submitRes = requests.post(submitURL, data=json.dumps(submitData), headers=h,verify=True)
+                    if submitRes.status_code in [202, 200]:
+                            logger.info("success submit for review")
+                            acceptURL = submitRes.json()['links']['actions']['accept']
+                            acceptData = {"payload": {"content": "You are in!", "format": "html"}}
+                            acceptRes = requests.post(acceptURL, data=json.dumps(acceptData), headers=h,verify=True)
+                            if acceptRes.status_code in [202, 200]:
+                                logger.info("Whole upload, review, submit and accept OK")
+                            else:
+                                logger.info(acceptRes.status_code)
+                                logger.info(acceptRes.json())
+                                return False
+                    else:
+                        logger.error(submitRes.status_code)
+                        logger.error(submitRes.json())
+                        return False
                 else:
-                    logger.error(submitRes.status_code)
-                    logger.error(submitRes.json())
+                    logger.error(reviewRes.status_code)
+                    logger.error(reviewRes.json())
                     return False
-            else:
-                logger.error(reviewRes.status_code)
-                logger.error(reviewRes.json())
+            else:    
+                logger.error(createRes.status_code)
+                logger.error(createRes.json())
+                writeToFile(invenioDict, file="PAC_failed_to_create_record")
                 return False
-        else:
-            logger.error(createRes.status_code)
-            logger.error(createRes.json())
-            return False
-
     return True
 
-
 def uploadModify(invenioDict):
-    pacID = invenioDict["custom_fields"]["rdm:pubID"]
-    ifExistsUrl = f'{INVENIOHOST}/api/records?q=custom_fields.rdm\\:pubID:"{pacID}"&l=list&p=1&s=10&sort=bestmatch'
+    pacID = invenioDict["custom_fields"]["pac:pacID"]
+    ifExistsUrl = f'{INVENIOHOST}/api/records?q=custom_fields.pac\\:pacID:"{pacID}"&l=list&p=1&s=10&sort=bestmatch'
     res = requests.get(ifExistsUrl)
     if res.status_code == 200:
         if res.json()['hits']['total'] == 0:
-            logger.info(f"Record with pubID {pacID} does not exist")
+            logger.info(f"Record with pacID {pacID} does not exist")
             logger.info("This should mean record is new")
             logger.info("This should NOT happend check with MIS group")
-            uploadNew()
+            uploadNew(invenioDict)
             return True
         if res.json()['hits']['total'] !=0:
             recordID = res.json()['hits']['hits'][0]["id"]
             createNewVersionURL = f'{INVENIOHOST}/api/records/{recordID}/versions'
-            createNewVersionData = {}
-            newVersionRes = requests.post(createNewVersionURL,data=json.dumps(createNewVersionData), headers=h,verify=True)
-            if newVersionRes.status_code == 200:
-                publishNewVersionURL = f'{INVENIOHOST}/api/records/{recordID}/draft/actions/publish'
-                publishNewVersionRes= requests.post(publishNewVersionURL,headers=h,verify=True)
-                if publishNewVersionRes.status_code == 202:
-                    logger.info("success publish new version")
+            newVersionRes = requests.post(createNewVersionURL,data={}, headers=h,verify=True)
+            new_data = newVersionRes.json()
+            new_data.update(invenioDict)
+            if newVersionRes.status_code in [200, 201]:
+                updatedraftRecordURL =  newVersionRes.json()['links']["self"]
+                updatedraftRecord = requests.put(updatedraftRecordURL,data=json.dumps(new_data), headers=h,verify=True)
+                if updatedraftRecord.status_code == 200:
+                    logger.info("success update draft record")
+                    publishNewVersionURL =updatedraftRecord.json()['links']["publish"]
+                    publishNewVersionRes= requests.post(publishNewVersionURL,headers=h,verify=True)
+                    if publishNewVersionRes.status_code == 202:
+                        logger.info("success publish new version")
+                    else:
+                        logger.error("publish error")
+                        logger.error(publishNewVersionRes.status_code)
+                        logger.error(publishNewVersionRes.json())
+                        return False
                 else:
-                    logger.error(publishNewVersionRes.status_code)
-                    logger.error(publishNewVersionRes.json())
+                    logger.error("update draft")
+                    logger.error(updatedraftRecord.status_code)
+                    logger.error(updatedraftRecord.json())
                     return False
             else:
                 logger.error(newVersionRes.status_code)
                 logger.error(newVersionRes.json())
+                writeToFile(invenioDict, file="PAC_failed_to_create_new_version")
                 return False
     else:
         logger.error(res.status_code)
         logger.error(res.json())
         return False
-    
     return True
-    
-
-        
+ 
 def callPACDB(action, submit_date_after = '', pac_number = '', modification_date = ''):
     if not any([submit_date_after, pac_number, modification_date]):
         return "OK"
@@ -387,12 +470,13 @@ def callPACDB(action, submit_date_after = '', pac_number = '', modification_date
         logger.error(pacDBRes.status_code)
         logger.error(pacDBRes.json())
         return False
-    
-    #think about how to call upload
+    for invenioDict in invenioDictList:
+        res = uploadModify(invenioDict)
+    return True
 
 yesterday = datetime.now() - timedelta(days=1)
 yesterday_str = yesterday.strftime("%Y-%m-%d")
 
 # First call with submit_date_after of yesterday
 callPACDB("new", submit_date_after=yesterday_str)
-callPACDB("modify", modification_date=yesterday_str)
+#callPACDB("modify", modification_date=yesterday_str)
