@@ -10,16 +10,20 @@ from logging.handlers import RotatingFileHandler
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
+INVENIOHOST = "https://inveniordm.jlab.org"
+TOKEN = ""
+COMMUNITYID = "7b99f013-91fa-4274-98ec-b465245ef779"
+LOG_DIR = "logs/pac"
+FAILED_DIR = "failed/pac"
+
 # Define log file name with timestamp and rotation
-log_file = datetime.now().strftime("pacdb_sync_logs_%Y-%m-%d.log")
+log_file = datetime.now().strftime(f"{LOG_DIR}/pacdb_sync_logs_%Y-%m-%d.log")
 handler = RotatingFileHandler(log_file, maxBytes=100000, backupCount=5)
 formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 handler.setFormatter(formatter)
 logger.addHandler(handler)
 
-INVENIOHOST = "https://inveniordm.jlab.org"
-TOKEN = "2cDHKHAiCs7R5WYh1KqADi74AT9dBuKVkRke4DuMYWAjyauHmtIvHXqJE6BO"
-COMMUNITYID = "7b99f013-91fa-4274-98ec-b465245ef779"
+
 
 h = {
         "Accept": "application/json",
@@ -333,7 +337,7 @@ def transform(entry):
 
 def writeToFile(data, file= "defaultName"):
     timestamp = datetime.now().strftime("%Y-%m-%d")
-    filename = f"{file}_{timestamp}.json"
+    filename = f"{FAILED_DIR}/{file}_{timestamp}.json"
     with open(filename, "w") as file:
         json.dump(data, file)
 

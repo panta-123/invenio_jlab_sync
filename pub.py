@@ -11,10 +11,10 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 INVENIOHOST = "https://inveniordm.jlab.org"
-TOKEN = "2cDHKHAiCs7R5WYh1KqADi74AT9dBuKVkRke4DuMYWAjyauHmtIvHXqJE6BO"
+TOKEN = ""
 COMMUNITYID = "69cf8901-1a33-44c6-83fa-04b4acf24941"
-LOG_DIR = "logs_pub"
-FAILED_DIR = "failed_pub"
+LOG_DIR = "logs/pub"
+FAILED_DIR = "failed/pub"
 
 # Define log file name with timestamp and rotation
 
