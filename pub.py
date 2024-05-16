@@ -10,16 +10,19 @@ import idutils
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
+INVENIOHOST = "https://inveniordm.jlab.org"
+TOKEN = "2cDHKHAiCs7R5WYh1KqADi74AT9dBuKVkRke4DuMYWAjyauHmtIvHXqJE6BO"
+COMMUNITYID = "69cf8901-1a33-44c6-83fa-04b4acf24941"
+LOG_DIR = "logs_pub"
+FAILED_DIR = "failed_pub"
+
 # Define log file name with timestamp and rotation
-log_file = datetime.now().strftime("pubdb_sync_logs_%Y-%m-%d.log")
+
+log_file = datetime.now().strftime(f"{LOG_DIR}/pubdb_sync_logs_%Y-%m-%d.log")
 handler = RotatingFileHandler(log_file, maxBytes=100000, backupCount=5)
 formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 handler.setFormatter(formatter)
 logger.addHandler(handler)
-
-INVENIOHOST = "https://inveniordm.jlab.org"
-TOKEN = ""
-COMMUNITYID = "c082a353-8c1c-46bd-a45d-d2293f2fb5aa"
 
 h = {
         "Accept": "application/json",
@@ -56,7 +59,16 @@ division_title_id = {
     "OTHERS" : "OTHERS"
 }
 
-def cleanedName(fullname):
+def cleanedName(fullname: str) -> dict[str, str]:
+    """
+    Splits the full name into given and family names.
+    
+    Args:
+        fullname (str): The full name of a person.
+        
+    Returns:
+        dict: A dictionary with given_name and family_name.
+    """
     names = fullname.split()
     # The first name includes the middle name if present
     first_name = ' '.join(names[:-1])
@@ -64,7 +76,17 @@ def cleanedName(fullname):
     last_name = names[-1]
     return {"type": "personal", "given_name":first_name, "family_name":last_name}
 
-def getPublicationDate(publication_date):
+def getPublicationDate(publication_date: str) -> str:
+    """
+    Formats the publication date to 'YYYY-MM' format.
+    
+    Args:
+        publication_date (str): The publication date in 'Month YYYY' format.
+        
+    Returns:
+        str: The formatted publication date.
+    """
+
     try:
         date_obj = datetime.strptime(publication_date, '%B %Y')
         publication_date = date_obj.strftime('%Y-%m')
@@ -134,11 +156,7 @@ def getLinksDict(links):
     isderivedfromdict =  { "identifier": html_record_url,
                             "scheme": "url",
                             "relation_type": {
-                                "id": "isderivedfrom",
-                                "title": {
-                                    "de": "Wird abgeleitet von",
-                                    "en": "Is derived from"
-                                    }
+                                "id": "isderivedfrom"
                             }
                         }
     returnDict = {"related_identifiers": [isderivedfromdict]}
@@ -153,11 +171,7 @@ def getAttachmentDict(attachments):
         isdocumentedbydict = { "identifier": attachment_url,
                             "scheme": "url",
                             "relation_type": {
-                                "id": "isdocumentedby",
-                                "title": {
-                                    "de": "Wird dokumentiert von",
-                                    "en": "Is documented by"
-                                }
+                                "id": "isdocumentedby"
                             }
                         }
         isdocumentedbyList.append(isdocumentedbydict)
@@ -320,6 +334,8 @@ def transform(entry):
             else:
                 # If only "url" is detected, add the DOI link as a URL
                 inveniodict["metadata"]["identifiers"].append({"identifier": lanl_number, "scheme": "url"})
+        else:
+            inveniodict["custom_fields"].update({"rdm:lanl_number": lanl_number})
         
 
     inveniodict["custom_fields"].update({"rdm:pubID": int(entry["pub_id"])})
@@ -380,7 +396,7 @@ def transform(entry):
 
 def writeToFile(data, file= "defaultName"):
     timestamp = datetime.now().strftime("%Y-%m-%d")
-    filename = f"{file}_{timestamp}.json"
+    filename = f"{FAILED_DIR}/{file}_{timestamp}.json"
     with open(filename, "w") as file:
         json.dump(data, file)
 
@@ -480,11 +496,27 @@ def uploadModify(invenioDict):
     return True
 
 
-def callPUBDB(action, submit_date_after = '', pub_year = '', modification_date = ''):
-    if not any([submit_date_after, pub_year, modification_date]):
-        return "OK"
+def callPUBDB(action, submit_date_after = '',
+              submit_date_before = '',
+              modification_date_after = '',
+              modification_date_before = '',
+              pub_year = ''):
+    if action == "new":
+        if not (submit_date_after and submit_date_before):
+            logger.error("submit_date_after is needed for action new")
+            return False
+        isNew = True
+    elif action == "modify":
+        if not (modification_date_after and modification_date_before):
+            logger.error("modification_date is needed for action modify")
+            return False
+        isModify = True
+    else:
+        logger.error(f"action {action} not recognized. Available action: new or modify")
+        return False
 
     invenioDictList = []
+    newVersionInvenioDictList = []
     pubDBURL = 'https://misportal.jlab.org/sti/publications/search.json'
     pubDBParams = {
         'action': 'search',
@@ -510,39 +542,67 @@ def callPUBDB(action, submit_date_after = '', pub_year = '', modification_date =
         'search[publ_submitter_NAME]': '',
         'search[published_only]': 'N',
         'search[submit_date_after]':submit_date_after,
-        'search[submit_date_before]':'',
-        'search[modification_date]':modification_date,
+        'search[submit_date_before]':submit_date_before,
+        'search[updated_date_after]':modification_date_after,
+        'search[updated_date_before]':modification_date_before,
         'search[title]': '',
         'utf8': '✓'
     }
     pubDBRes = requests.get(pubDBURL, params=pubDBParams)
     jsonRecordURLList = []
+    newVersionJsonURLList = []
     if pubDBRes.status_code == 200:
         dataJSON = pubDBRes.json()
         dataList = dataJSON["data"]
-        for  data in dataList:
-            json_record_url = data["json_record_url"]
-            jsonRecordURLList.append(json_record_url)
+        for  dat in dataList:
+            json_record_url = dat["json_record_url"]
+            modification_date   = dat["modification_date"]
+            submit_date = dat["submit_date"]
+            if isModify:
+                if submit_date == modification_date:
+                    logger.info("When modify is called and same submit and modify date,\
+                                 do nothing")
+                else:
+                    newVersionJsonURLList.append(json_record_url)
+            else:
+                jsonRecordURLList.append(json_record_url)
     else:
         logger.error(pubDBRes.status_code)
         logger.error(pubDBRes.json())
         return False
 
-    for URL in jsonRecordURLList:
-        pubDBResEachJSON = requests.get(URL)
-        if pubDBResEachJSON.status_code == 200:
-            dataJSON = pubDBResEachJSON.json()
-            invenioDict = transform(dataJSON)
-            invenioDictList.append(invenioDict)
-    for invenioDict in invenioDictList:
-        res = uploadModify(invenioDict)
-        
-    return True
+    if newVersionJsonURLList:
+        for URL in jsonRecordURLList:
+            pubDBResEachJSON = requests.get(URL)
+            if pubDBResEachJSON.status_code == 200:
+                dataJSON = pubDBResEachJSON.json()
+                invenioDict = transform(dataJSON)
+                newVersionInvenioDictList.append(invenioDict)
 
+    if jsonRecordURLList:
+        for URL in jsonRecordURLList:
+            pubDBResEachJSON = requests.get(URL)
+            if pubDBResEachJSON.status_code == 200:
+                dataJSON = pubDBResEachJSON.json()
+                invenioDict = transform(dataJSON)
+                invenioDictList.append(invenioDict)
 
+    if invenioDictList:
+        for invenioDict in invenioDictList:
+            uploadNew(invenioDict)
+
+    if newVersionInvenioDictList:
+        for invenioDict in newVersionInvenioDictList:
+            uploadModify(invenioDict)
+
+today = datetime.now()
+today_str = today.strftime("%m/%d/%Y")
 yesterday = datetime.now() - timedelta(days=1)
-yesterday_str = yesterday.strftime("%Y-%m-%d")
+yesterday_str = yesterday.strftime("%m/%d/%Y")
 
-# First call with submit_date_after of yesterday
-callPUBDB("new", submit_date_after=yesterday_str)
-#callPUBDB("modify", modification_date=yesterday_str)
+def main():
+    callPUBDB("new", submit_date_after=yesterday_str, submit_date_before=today_str)
+    callPUBDB("modify", modification_date_after=yesterday_str, modification_date_before=today_str)
+
+if __name__ == "__main__":
+    main()

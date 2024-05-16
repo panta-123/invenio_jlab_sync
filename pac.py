@@ -18,7 +18,7 @@ handler.setFormatter(formatter)
 logger.addHandler(handler)
 
 INVENIOHOST = "https://inveniordm.jlab.org"
-TOKEN = ""
+TOKEN = "2cDHKHAiCs7R5WYh1KqADi74AT9dBuKVkRke4DuMYWAjyauHmtIvHXqJE6BO"
 COMMUNITYID = "7b99f013-91fa-4274-98ec-b465245ef779"
 
 h = {
@@ -92,7 +92,7 @@ def processCreators(entry):
             }
             institution = author.get("institution","")
             if institution:
-                if institution.lower() == "jefferson jab":
+                if institution.lower() == "jefferson lab":
                     institution_fullname = "Thomas Jefferson National Accelerator Facility"
                 elif institution.lower() == "jlab":
                      institution_fullname = "Thomas Jefferson National Accelerator Facility"
@@ -153,7 +153,7 @@ def processCreators(entry):
         cDict = {
             "person_or_org" : {"type": "personal",
             "given_name": "None Listed",
-            "family_name": ""},
+            "family_name": "None Listed"},
             "role": {"id":"researcher"}}
         creators.append(cDict)
     return {"creators": creators}
@@ -429,21 +429,19 @@ def uploadModify(invenioDict):
         logger.error(res.json())
         return False
     return True
- 
-def callPACDB(action, submit_date_after = '', pac_number = '', modification_date = ''):
-    if not any([submit_date_after, pac_number, modification_date]):
-        return "OK"
-    
-    isModify = False
-    isNew = False
-
+   
+def callPACDB(action, submit_date_after = '',
+              submit_date_before = '',
+              modification_date_after = '',
+              modification_date_before = '',
+              pac_number = ''):
     if action == "new":
-        if not submit_date_after:
+        if not (submit_date_after and submit_date_before):
             logger.error("submit_date_after is needed for action new")
             return False
         isNew = True
     elif action == "modify":
-        if not modification_date:
+        if not (modification_date_after and modification_date_before):
             logger.error("modification_date is needed for action modify")
             return False
         isModify = True
@@ -452,31 +450,57 @@ def callPACDB(action, submit_date_after = '', pac_number = '', modification_date
         return False
 
     invenioDictList = []
+    newVersionInvenioDictList = []
     pacDBURL = 'https://misportal.jlab.org/pacProposals/proposals/download.json'
     pacDBParams = {
         'pac_number': pac_number,
         'type_id': '',
         'submit_date_after': submit_date_after,
         'submit_date_before': '',
-        'modification_date': modification_date}
+        'modification_date_after': modification_date_after,
+        'modification_date_before': modification_date_before}
     pacDBRes = requests.get(pacDBURL, params=pacDBParams)
+
     if pacDBRes.status_code == 200:
-        data_dict = pacDBRes.json()
-        data = data_dict["data"]
-        for entry in data:
+        dataJSON = pacDBRes.json()
+        dataList = dataJSON["data"]
+        if not dataList:
+            logger.info("No data available for the query. Its OK.")
+            return True
+
+        for  entry in dataList:
+            modification_date  = entry["updated_date"]
+            submit_date = entry["submitted_date"]
             invenioDict = transform(entry)
-            invenioDictList.append(invenioDict)
+            if isModify:
+                if submit_date == modification_date:
+                    logger.info("When modify is called and same submit and modify date,\
+                                 do nothing")
+                else:
+                    newVersionInvenioDictList.append(invenioDict)
+            else:
+                invenioDictList.append(invenioDict)
     else:
         logger.error(pacDBRes.status_code)
         logger.error(pacDBRes.json())
         return False
-    for invenioDict in invenioDictList:
-        res = uploadModify(invenioDict)
-    return True
 
+    if invenioDictList:
+        for invenioDict in invenioDictList:
+            uploadNew(invenioDict)
+
+    if newVersionInvenioDictList:
+        for invenioDict in newVersionInvenioDictList:
+            uploadModify(invenioDict)
+
+today = datetime.now()
+today_str = today.strftime("%m/%d/%Y")
 yesterday = datetime.now() - timedelta(days=1)
-yesterday_str = yesterday.strftime("%Y-%m-%d")
+yesterday_str = yesterday.strftime("%m/%d/%Y")
 
-# First call with submit_date_after of yesterday
-callPACDB("new", submit_date_after=yesterday_str)
-#callPACDB("modify", modification_date=yesterday_str)
+def main():
+    callPACDB("new", submit_date_after=yesterday_str, submit_date_before=today_str)
+    callPACDB("modify", modification_date_after=yesterday_str, modification_date_before=today_str)
+
+if __name__ == "__main__":
+    main()
