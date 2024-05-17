@@ -439,6 +439,8 @@ def callPACDB(action, submit_date_after = '',
               modification_date_after = '',
               modification_date_before = '',
               pac_number = ''):
+    isModify = False
+    isNew = False
     if action == "new":
         if not (submit_date_after and submit_date_before):
             logger.error("submit_date_after is needed for action new")

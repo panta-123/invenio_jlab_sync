@@ -501,6 +501,8 @@ def callPUBDB(action, submit_date_after = '',
               modification_date_after = '',
               modification_date_before = '',
               pub_year = ''):
+    isModify = False
+    isNew = False
     if action == "new":
         if not (submit_date_after and submit_date_before):
             logger.error("submit_date_after is needed for action new")
@@ -572,7 +574,7 @@ def callPUBDB(action, submit_date_after = '',
         return False
 
     if newVersionJsonURLList:
-        for URL in jsonRecordURLList:
+        for URL in newVersionJsonURLList:
             pubDBResEachJSON = requests.get(URL)
             if pubDBResEachJSON.status_code == 200:
                 dataJSON = pubDBResEachJSON.json()
