@@ -403,7 +403,7 @@ def writeToFile(data, file= "defaultName"):
 def uploadNew(invenioDict):
     pubID = invenioDict["custom_fields"]["rdm:pubID"]
     ifExistsUrl = f'{INVENIOHOST}/api/records?q=custom_fields.rdm\\:pubID:"{pubID}"&l=list&p=1&s=10&sort=bestmatch'
-    res = requests.get(ifExistsUrl)
+    res = requests.get(ifExistsUrl, headers=h, verify=True)
     if res.status_code == 200:
         if res.json()['hits']['total'] != 0:
             logger.info(f"Record with pubID {pubID} already exists")
@@ -451,7 +451,7 @@ def uploadNew(invenioDict):
 def uploadModify(invenioDict):
     pubID = invenioDict["custom_fields"]["rdm:pubID"]
     ifExistsUrl = f'{INVENIOHOST}/api/records?q=custom_fields.rdm\\:pubID:"{pubID}"&l=list&p=1&s=10&sort=bestmatch'
-    res = requests.get(ifExistsUrl)
+    res = requests.get(ifExistsUrl,headers=h,verify=True)
     if res.status_code == 200:
         if res.json()['hits']['total'] == 0:
             logger.info(f"Record with pubID {pubID} does not exist")

@@ -344,7 +344,7 @@ def writeToFile(data, file= "defaultName"):
 def uploadNew(invenioDict):
     pacID = invenioDict["custom_fields"]["pac:pacID"]
     ifExistsUrl = f'{INVENIOHOST}/api/records?q=custom_fields.pac\\:pacID:"{pacID}"&l=list&p=1&s=10&sort=bestmatch'
-    res = requests.get(ifExistsUrl)
+    res = requests.get(ifExistsUrl,headers=h, verify=True)
     if res.status_code == 200:
         if res.json()['hits']['total'] != 0:
             logger.info(f"Record with pacID {pacID} already exists")
@@ -390,7 +390,7 @@ def uploadNew(invenioDict):
 def uploadModify(invenioDict):
     pacID = invenioDict["custom_fields"]["pac:pacID"]
     ifExistsUrl = f'{INVENIOHOST}/api/records?q=custom_fields.pac\\:pacID:"{pacID}"&l=list&p=1&s=10&sort=bestmatch'
-    res = requests.get(ifExistsUrl)
+    res = requests.get(ifExistsUrl, headers=h,verify=True)
     if res.status_code == 200:
         if res.json()['hits']['total'] == 0:
             logger.info(f"Record with pacID {pacID} does not exist")
@@ -462,9 +462,9 @@ def callPACDB(action, submit_date_after = '',
         'pac_number': pac_number,
         'type_id': '',
         'submit_date_after': submit_date_after,
-        'submit_date_before': '',
-        'modification_date_after': modification_date_after,
-        'modification_date_before': modification_date_before}
+        'submit_date_before': submit_date_before,
+        'updated_date_after': modification_date_after,
+        'updated_date_before': modification_date_before}
     pacDBRes = requests.get(pacDBURL, params=pacDBParams)
 
     if pacDBRes.status_code == 200:
